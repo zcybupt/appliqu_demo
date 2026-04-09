@@ -119,7 +119,8 @@ export default function App() {
     setPreviewDirty(false);
     setPreviewError("");
     try {
-      const samplePath = "/files/1-1 201528-labelmap vietnam.pdf";
+      const samplePath =
+        "https://appliqu-1330656709.cos.ap-guangzhou.myqcloud.com/1-1%20201528-labelmap%20vietnam.pdf";
       const response = await fetch(samplePath);
       if (!response.ok) {
         throw new Error("未找到样例 PDF，请确认文件路径。");
