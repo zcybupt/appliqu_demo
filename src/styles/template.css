@@ -1,0 +1,4 @@
+/* 保留给模板相关样式扩展（当前 PDF 由 pdf-lib 绘制） */
+.report-template-note {
+  display: none;
+}
