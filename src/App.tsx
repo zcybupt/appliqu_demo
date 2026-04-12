@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { diffImages } from "./features/compare/diffImages";
 import { generateReportPdf } from "./features/export/generateReportPdf";
 import { ReportTemplatePage } from "./features/export/ReportTemplatePage";
 import { buildPdfPagePreviews, loadPdfDocument } from "./features/upload/loadPdfPreview";
@@ -46,6 +45,13 @@ const EMPTY_PROGRESS: SplitProgressState = { value: 0, label: "等待开始", ac
 
 const DECAL_BASE = "https://appliqu-1330656709.cos.ap-guangzhou.myqcloud.com/decals/";
 const DEFAULT_REPORT_MODEL = "88081-YGK0214";
+
+const DIFF_BASE = "https://appliqu-1330656709.cos.ap-guangzhou.myqcloud.com/diff/";
+const SAMPLE_IMAGES = [
+  { id: "sample-a", name: "sample A.png", url: `${DIFF_BASE}sample%20A.png` },
+  { id: "sample-b", name: "sample B.png", url: `${DIFF_BASE}sample%20B.png` },
+] as const;
+const DIFF_RESULT_URL = `${DIFF_BASE}result.png`;
 const DEFAULT_DECAL_TYPE = "机油瓶标贴";
 const DEFAULT_MATERIAL = "铜版纸覆哑膜";
 
@@ -87,8 +93,8 @@ export default function App() {
   const [loadingPdf, setLoadingPdf] = useState(false);
   const [splitProgress, setSplitProgress] = useState<SplitProgressState>(EMPTY_PROGRESS);
   const [splitImages, setSplitImages] = useState<ExtractedImage[]>([]);
-  const [selectedLeftId, setSelectedLeftId] = useState<string>("");
-  const [selectedRightId, setSelectedRightId] = useState<string>("");
+  const [selectedLeftId, setSelectedLeftId] = useState<string>(SAMPLE_IMAGES[0].id);
+  const [selectedRightId, setSelectedRightId] = useState<string>(SAMPLE_IMAGES[1].id);
   const [diffResult, setDiffResult] = useState<DiffResult | null>(null);
   const [errorMessage, setErrorMessage] = useState<string>("");
   const [selectedForDoc, setSelectedForDoc] = useState<string[]>([]);
@@ -216,7 +222,7 @@ export default function App() {
 
     for (const step of steps) {
       setSplitProgress({ ...step, active: step.value < 100 });
-      await new Promise<void>((r) => setTimeout(r, 300));
+      await new Promise<void>((r) => setTimeout(r, 1200));
     }
 
     const images = buildDecalImages();
@@ -228,20 +234,25 @@ export default function App() {
     setSelectedRightId(images[1].id);
   };
 
-  const handleCompare = async () => {
-    const left = imageMap.get(selectedLeftId);
-    const right = imageMap.get(selectedRightId);
-    if (!left || !right) {
+  const handleCompare = () => {
+    if (!selectedLeftId || !selectedRightId) {
       setErrorMessage("请先选择两张图片再进行对比。");
       return;
     }
-    setErrorMessage("");
-    try {
-      const result = await diffImages(left.dataUrl, right.dataUrl);
-      setDiffResult(result);
-    } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "图片对比失败。");
+    if (selectedLeftId === selectedRightId) {
+      setErrorMessage("请选择不同的两张图片进行对比。");
+      return;
     }
+    setErrorMessage("");
+    setDiffResult({
+      width: 0,
+      height: 0,
+      diffPixels: 0,
+      boxes: [],
+      leftOverlayDataUrl: "",
+      rightOverlayDataUrl: "",
+      diffMaskDataUrl: DIFF_RESULT_URL,
+    });
   };
 
   const toggleDocSelection = (id: string) => {
@@ -412,7 +423,7 @@ export default function App() {
       <section className="panel">
         <div className="panel-head">
           <h2>3) 选择两图自动对比</h2>
-          <button type="button" className="btn" onClick={() => void handleCompare()} disabled={splitImages.length < 2}>
+          <button type="button" className="btn" onClick={handleCompare}>
             对比
           </button>
         </div>
@@ -420,8 +431,7 @@ export default function App() {
           <label>
             左图
             <select value={selectedLeftId} onChange={(e) => setSelectedLeftId(e.target.value)}>
-              <option value="">请选择</option>
-              {splitImages.map((img) => (
+              {SAMPLE_IMAGES.map((img) => (
                 <option value={img.id} key={`left-${img.id}`}>
                   {img.name}
                 </option>
@@ -431,8 +441,7 @@ export default function App() {
           <label>
             右图
             <select value={selectedRightId} onChange={(e) => setSelectedRightId(e.target.value)}>
-              <option value="">请选择</option>
-              {splitImages.map((img) => (
+              {SAMPLE_IMAGES.map((img) => (
                 <option value={img.id} key={`right-${img.id}`}>
                   {img.name}
                 </option>
@@ -440,24 +449,28 @@ export default function App() {
             </select>
           </label>
         </div>
+        <div className="compare-previews">
+          {SAMPLE_IMAGES.map((img) => (
+            <article key={img.id} className="image-card clickable" onClick={() => openLightbox(img.url, img.name)}>
+              <img src={img.url} alt={img.name} />
+              <p>{img.name}</p>
+            </article>
+          ))}
+        </div>
         {diffResult ? (
           <div className="compare-result">
-            <article>
-              <h3>左图差异圈选</h3>
-              <img src={diffResult.leftOverlayDataUrl} alt="left-overlay" />
+            <article className="compare-result-full">
+              <h3>对比结果</h3>
+              <img
+                src={diffResult.diffMaskDataUrl}
+                alt="diff-result"
+                className="clickable"
+                onClick={() => openLightbox(diffResult.diffMaskDataUrl, "对比结果")}
+              />
             </article>
-            <article>
-              <h3>右图差异圈选</h3>
-              <img src={diffResult.rightOverlayDataUrl} alt="right-overlay" />
-            </article>
-            <article>
-              <h3>差异掩膜</h3>
-              <img src={diffResult.diffMaskDataUrl} alt="diff-mask" />
-            </article>
-            <p className="muted">检测到差异像素：{diffResult.diffPixels}；差异区域：{diffResult.boxes.length} 处。</p>
           </div>
         ) : (
-          <p className="muted">请选择两张分解图后点击“对比”。</p>
+          <p className="muted">请选择两张图片后点击"对比"。</p>
         )}
       </section>
 

@@ -158,9 +158,16 @@ body {
   padding: 8px;
 }
 
+.compare-previews {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
 .compare-result {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  grid-template-columns: 1fr;
   gap: 12px;
 }
 
@@ -168,6 +175,10 @@ body {
   border: 1px solid #e5e7eb;
   border-radius: 10px;
   padding: 10px;
+}
+
+.compare-result-full {
+  max-width: 720px;
 }
 
 .compare-result h3 {
