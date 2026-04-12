@@ -1,198 +1,187 @@
-import { PDFDocument, type PDFFont, type PDFPage, StandardFonts, rgb } from "pdf-lib";
+import html2canvas from "html2canvas";
+import { PDFDocument } from "pdf-lib";
 
-import type { ExtractedImage } from "../../types";
+import templateImage from "../../../files/template.png";
 
-interface ReportItem {
-  image: ExtractedImage;
-  description: string;
-}
-
-interface EmbeddedImageMeta {
-  image: Awaited<ReturnType<PDFDocument["embedPng"]>>;
-  width: number;
-  height: number;
-}
+const PAGE_SIZE: [number, number] = [595, 842];
 
 function dataUrlToBytes(dataUrl: string): Uint8Array {
-  const [_, base64] = dataUrl.split(",");
+  const [, base64] = dataUrl.split(",");
   const binary = window.atob(base64);
   const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i += 1) {
-    bytes[i] = binary.charCodeAt(i);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
   }
   return bytes;
 }
 
-async function embedImage(pdfDoc: PDFDocument, dataUrl: string): Promise<EmbeddedImageMeta> {
-  const bytes = dataUrlToBytes(dataUrl);
-  if (dataUrl.includes("image/jpeg")) {
-    const image = await pdfDoc.embedJpg(bytes);
-    return { image, width: image.width, height: image.height };
-  }
-  const image = await pdfDoc.embedPng(bytes);
-  return { image, width: image.width, height: image.height };
+async function blobToDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === "string") {
+        resolve(reader.result);
+        return;
+      }
+      reject(new Error("图片转换失败。"));
+    };
+    reader.onerror = () => reject(new Error("图片转换失败。"));
+    reader.readAsDataURL(blob);
+  });
 }
 
-function drawWrappedText(
-  page: PDFPage,
-  text: string,
-  x: number,
-  y: number,
-  maxWidth: number,
-  lineHeight: number,
-  font: PDFFont,
-  size: number
-): void {
-  const words = text.split(/\s+/).filter(Boolean);
-  let line = "";
-  let cursorY = y;
-
-  for (const word of words) {
-    const candidate = line ? `${line} ${word}` : word;
-    const candidateWidth = font.widthOfTextAtSize(candidate, size);
-    if (candidateWidth > maxWidth && line) {
-      page.drawText(line, { x, y: cursorY, size, font, color: rgb(0.1, 0.1, 0.1) });
-      line = word;
-      cursorY -= lineHeight;
-    } else {
-      line = candidate;
-    }
+async function srcToBytes(src: string): Promise<Uint8Array> {
+  if (src.startsWith("data:")) {
+    return dataUrlToBytes(src);
   }
 
-  if (line) {
-    page.drawText(line, { x, y: cursorY, size, font, color: rgb(0.1, 0.1, 0.1) });
+  const response = await fetch(src);
+  if (!response.ok) {
+    throw new Error(`资源加载失败：${src}`);
   }
+
+  return new Uint8Array(await response.arrayBuffer());
 }
 
-function fitSize(
-  sourceWidth: number,
-  sourceHeight: number,
-  maxWidth: number,
-  maxHeight: number
-): { width: number; height: number } {
-  const ratio = Math.min(maxWidth / sourceWidth, maxHeight / sourceHeight);
-  return {
-    width: sourceWidth * ratio,
-    height: sourceHeight * ratio,
-  };
+async function inlineCloneImages(source: HTMLElement, clone: HTMLElement): Promise<void> {
+  const sourceImages = Array.from(source.querySelectorAll("img"));
+  const cloneImages = Array.from(clone.querySelectorAll("img"));
+
+  await Promise.all(
+    cloneImages.map(async (cloneImage, index) => {
+      const sourceImage = sourceImages[index];
+      const src = sourceImage?.currentSrc || sourceImage?.getAttribute("src") || cloneImage.getAttribute("src");
+      if (!src || src.startsWith("data:")) {
+        return;
+      }
+
+      try {
+        const response = await fetch(src);
+        if (!response.ok) {
+          throw new Error(`图片加载失败: ${src}`);
+        }
+        const dataUrl = await blobToDataUrl(await response.blob());
+        cloneImage.setAttribute("src", dataUrl);
+      } catch {
+        cloneImage.setAttribute("crossorigin", "anonymous");
+      }
+    })
+  );
 }
 
-export async function generateReportPdf(items: ReportItem[]): Promise<Uint8Array> {
-  if (items.length === 0) {
-    throw new Error("请至少选择一张图片生成文档。");
+async function createExportClone(
+  element: HTMLElement,
+  width: number,
+  height: number
+): Promise<HTMLElement> {
+  const clone = element.cloneNode(true) as HTMLElement;
+  clone.style.position = "fixed";
+  clone.style.left = "-10000px";
+  clone.style.top = "0";
+  clone.style.margin = "0";
+  clone.style.zIndex = "-1";
+  clone.style.pointerEvents = "none";
+  clone.style.boxShadow = "none";
+  clone.style.transform = "none";
+  clone.style.contentVisibility = "visible";
+  // Force explicit page dimensions so the clone doesn't collapse when detached from its parent
+  clone.style.width = `${width}px`;
+  clone.style.height = `${height}px`;
+  clone.style.overflow = "hidden";
+
+  document.body.appendChild(clone);
+  await inlineCloneImages(element, clone);
+  return clone;
+}
+
+
+async function waitForElementAssets(element: HTMLElement): Promise<void> {
+  const images = Array.from(element.querySelectorAll("img"));
+  await Promise.all(
+    images.map(
+      (image) =>
+        new Promise<void>((resolve) => {
+          if (image.complete) {
+            resolve();
+            return;
+          }
+
+          const finish = () => {
+            image.removeEventListener("load", finish);
+            image.removeEventListener("error", finish);
+            resolve();
+          };
+
+          image.addEventListener("load", finish, { once: true });
+          image.addEventListener("error", finish, { once: true });
+        })
+    )
+  );
+
+  if ("fonts" in document) {
+    await document.fonts.ready;
+  }
+
+  await new Promise<void>((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+  });
+}
+
+export async function generateReportPdf(pageElements: HTMLElement[]): Promise<Uint8Array> {
+  if (pageElements.length === 0) {
+    throw new Error("请先生成 HTML 预览后再导出 PDF。");
   }
 
   const pdfDoc = await PDFDocument.create();
-  const regular = await pdfDoc.embedFont(StandardFonts.Helvetica);
-  const bold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
-  const pageSize: [number, number] = [595, 842];
+  const templateBytes = await srcToBytes(templateImage);
+  const templatePng = await pdfDoc.embedPng(templateBytes);
 
-  for (const [idx, item] of items.entries()) {
-    const page = pdfDoc.addPage(pageSize);
-    const [pageWidth, pageHeight] = pageSize;
-    const margin = 26;
+  for (const element of pageElements) {
+    const overlayElement = element.querySelector("[data-report-overlay]");
+    if (!(overlayElement instanceof HTMLElement)) {
+      throw new Error("HTML 预览结构不完整，缺少前景层。");
+    }
 
-    page.drawRectangle({
-      x: margin,
-      y: margin,
-      width: pageWidth - margin * 2,
-      height: pageHeight - margin * 2,
-      borderColor: rgb(0.2, 0.2, 0.2),
-      borderWidth: 1,
-    });
+    const [pageW, pageH] = PAGE_SIZE;
+    const exportClone = await createExportClone(overlayElement, pageW, pageH);
 
-    const titleBottomY = pageHeight - 112;
-    page.drawLine({
-      start: { x: margin, y: titleBottomY },
-      end: { x: pageWidth - margin, y: titleBottomY },
-      thickness: 1,
-      color: rgb(0.2, 0.2, 0.2),
-    });
-    page.drawLine({
-      start: { x: pageWidth - 220, y: margin },
-      end: { x: pageWidth - 220, y: titleBottomY },
-      thickness: 1,
-      color: rgb(0.2, 0.2, 0.2),
-    });
+    try {
+      await waitForElementAssets(exportClone);
 
-    page.drawText("ENGINE OIL LABEL REPORT", {
-      x: margin + 12,
-      y: pageHeight - 72,
-      size: 16,
-      font: bold,
-      color: rgb(0.08, 0.08, 0.08),
-    });
-    page.drawText("CHONGQING RATO POWER CO., LTD", {
-      x: margin + 12,
-      y: pageHeight - 94,
-      size: 9,
-      font: regular,
-      color: rgb(0.2, 0.2, 0.2),
-    });
-    page.drawText(`Doc No: 88081-YGK0214`, {
-      x: pageWidth - 206,
-      y: pageHeight - 66,
-      size: 9,
-      font: regular,
-      color: rgb(0.1, 0.1, 0.1),
-    });
-    page.drawText(`Page: ${idx + 1}/${items.length}`, {
-      x: pageWidth - 206,
-      y: pageHeight - 82,
-      size: 9,
-      font: regular,
-      color: rgb(0.1, 0.1, 0.1),
-    });
+      const canvas = await html2canvas(exportClone, {
+        backgroundColor: null,
+        useCORS: true,
+        logging: false,
+        scale: 3,
+        width: pageW,
+        height: pageH,
+        windowWidth: pageW,
+        windowHeight: pageH,
+      });
 
-    const embedded = await embedImage(pdfDoc, item.image.dataUrl);
-    const imageBox = {
-      x: 92,
-      y: 316,
-      width: pageWidth - 92 * 2,
-      height: 374,
-    };
-    const fitted = fitSize(embedded.width, embedded.height, imageBox.width, imageBox.height);
-    page.drawImage(embedded.image, {
-      x: imageBox.x + (imageBox.width - fitted.width) / 2,
-      y: imageBox.y + (imageBox.height - fitted.height) / 2,
-      width: fitted.width,
-      height: fitted.height,
-    });
+      const pngBytes = dataUrlToBytes(canvas.toDataURL("image/png"));
+      const embeddedImage = await pdfDoc.embedPng(pngBytes);
+      const page = pdfDoc.addPage(PAGE_SIZE);
 
-    page.drawRectangle({
-      x: imageBox.x,
-      y: imageBox.y,
-      width: imageBox.width,
-      height: imageBox.height,
-      borderColor: rgb(0.22, 0.22, 0.22),
-      borderWidth: 1,
-    });
-
-    const descTopY = 280;
-    page.drawText(`Image: ${item.image.name} (Page ${item.image.pageNumber})`, {
-      x: margin + 12,
-      y: descTopY,
-      size: 10,
-      font: bold,
-      color: rgb(0.1, 0.1, 0.1),
-    });
-    page.drawText("Description", {
-      x: margin + 12,
-      y: descTopY - 20,
-      size: 10,
-      font: bold,
-      color: rgb(0.1, 0.1, 0.1),
-    });
-    drawWrappedText(
-      page,
-      item.description || "No description provided.",
-      margin + 12,
-      descTopY - 38,
-      pageWidth - margin * 2 - 24,
-      14,
-      regular,
-      10
-    );
+      page.drawImage(templatePng, {
+        x: 0,
+        y: 0,
+        width: PAGE_SIZE[0],
+        height: PAGE_SIZE[1],
+      });
+      page.drawImage(embeddedImage, {
+        x: 0,
+        y: 0,
+        width: PAGE_SIZE[0],
+        height: PAGE_SIZE[1],
+      });
+    } catch (error) {
+      throw error instanceof Error
+        ? error
+        : new Error("HTML 转 PDF 失败，请确认预览中的图片已加载完成。");
+    } finally {
+      exportClone.remove();
+    }
   }
 
   return pdfDoc.save();

@@ -14,6 +14,28 @@ export interface ExtractedImage {
   dataUrl: string;
 }
 
+export interface ReportFormValues {
+  model: string;
+  decalName: string;
+  decalType: string;
+  material: string;
+  technicalRequirements: string;
+}
+
+export interface ReportOffset {
+  x: number;
+  y: number;
+}
+
+export interface ReportLayout {
+  image: ReportOffset;
+  technical: ReportOffset;
+}
+
+export interface ReportPdfItem extends ReportFormValues {
+  image: ExtractedImage;
+}
+
 export interface SplitProgressState {
   value: number;
   label: string;

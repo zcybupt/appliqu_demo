@@ -1,10 +1,17 @@
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { diffImages } from "./features/compare/diffImages";
 import { generateReportPdf } from "./features/export/generateReportPdf";
-import { extractImagesFromPdf } from "./features/split/extractImagesFromPdf";
+import { ReportTemplatePage } from "./features/export/ReportTemplatePage";
 import { buildPdfPagePreviews, loadPdfDocument } from "./features/upload/loadPdfPreview";
-import type { DiffResult, ExtractedImage, PdfPagePreview, SplitProgressState } from "./types";
+import type {
+  DiffResult,
+  ExtractedImage,
+  PdfPagePreview,
+  ReportLayout,
+  ReportFormValues,
+  SplitProgressState,
+} from "./types";
 
 function readFileAsBytes(file: File): Promise<Uint8Array> {
   return new Promise((resolve, reject) => {
@@ -35,15 +42,47 @@ function downloadBytes(bytes: Uint8Array, filename: string): void {
   URL.revokeObjectURL(url);
 }
 
-const EMPTY_PROGRESS: SplitProgressState = {
-  value: 0,
-  label: "等待开始",
-  active: false,
-};
+const EMPTY_PROGRESS: SplitProgressState = { value: 0, label: "等待开始", active: false };
+
+const DECAL_BASE = "https://appliqu-1330656709.cos.ap-guangzhou.myqcloud.com/decals/";
+const DEFAULT_REPORT_MODEL = "88081-YGK0214";
+const DEFAULT_DECAL_TYPE = "机油瓶标贴";
+const DEFAULT_MATERIAL = "铜版纸覆哑膜";
+
+function buildDecalImages(): ExtractedImage[] {
+  return Array.from({ length: 18 }, (_, i) => {
+    const seq = String(i + 1).padStart(3, "0");
+    const name = `corp_${seq}`;
+    return {
+      id: name,
+      pageNumber: i + 1,
+      name,
+      width: 0,
+      height: 0,
+      dataUrl: `${DECAL_BASE}${name}.png`,
+    };
+  });
+}
+
+function buildDefaultReportForm(image: ExtractedImage): ReportFormValues {
+  return {
+    model: DEFAULT_REPORT_MODEL,
+    decalName: image.name,
+    decalType: DEFAULT_DECAL_TYPE,
+    material: DEFAULT_MATERIAL,
+    technicalRequirements: "",
+  };
+}
+
+function buildDefaultReportLayout(): ReportLayout {
+  return {
+    image: { x: 0, y: 0 },
+    technical: { x: 0, y: 0 },
+  };
+}
 
 export default function App() {
   const [pdfName, setPdfName] = useState<string>("");
-  const [pdfBytes, setPdfBytes] = useState<Uint8Array | null>(null);
   const [pdfPreviews, setPdfPreviews] = useState<PdfPagePreview[]>([]);
   const [loadingPdf, setLoadingPdf] = useState(false);
   const [splitProgress, setSplitProgress] = useState<SplitProgressState>(EMPTY_PROGRESS);
@@ -52,15 +91,30 @@ export default function App() {
   const [selectedRightId, setSelectedRightId] = useState<string>("");
   const [diffResult, setDiffResult] = useState<DiffResult | null>(null);
   const [errorMessage, setErrorMessage] = useState<string>("");
-  const [exporting, setExporting] = useState(false);
   const [selectedForDoc, setSelectedForDoc] = useState<string[]>([]);
-  const [descriptions, setDescriptions] = useState<Record<string, string>>({});
+  const [reportForms, setReportForms] = useState<Record<string, ReportFormValues>>({});
+  const [reportLayouts, setReportLayouts] = useState<Record<string, ReportLayout>>({});
   const [previewOpen, setPreviewOpen] = useState(false);
-  const [previewPdfUrl, setPreviewPdfUrl] = useState("");
-  const [previewPdfBytes, setPreviewPdfBytes] = useState<Uint8Array | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
-  const [previewDirty, setPreviewDirty] = useState(false);
   const [previewError, setPreviewError] = useState("");
+  const [lightbox, setLightbox] = useState<{ src: string; alt: string } | null>(null);
+  const previewPageRefs = useRef<Record<string, HTMLDivElement | null>>({});
+
+  const openLightbox = useCallback((src: string, alt: string) => setLightbox({ src, alt }), []);
+  const closeLightbox = useCallback(() => setLightbox(null), []);
+
+  useEffect(() => {
+    if (!lightbox) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") closeLightbox(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [lightbox, closeLightbox]);
+
+  useEffect(() => {
+    const locked = previewOpen || lightbox !== null;
+    document.body.style.overflow = locked ? "hidden" : "";
+    return () => { document.body.style.overflow = ""; };
+  }, [previewOpen, lightbox]);
 
   const imageMap = useMemo(
     () => new Map(splitImages.map((img) => [img.id, img])),
@@ -75,20 +129,27 @@ export default function App() {
     [imageMap, selectedForDoc]
   );
 
+  const selectedReportItems = useMemo(
+    () =>
+      selectedItemsForDoc.map((image) => ({
+        image,
+        ...buildDefaultReportForm(image),
+        ...(reportForms[image.id] ?? {}),
+      })),
+    [reportForms, selectedItemsForDoc]
+  );
+
+  const allDocSelected = splitImages.length > 0 && selectedForDoc.length === splitImages.length;
+
   const handleFileChange = async (file: File) => {
     setErrorMessage("");
     setDiffResult(null);
     setSplitImages([]);
     setSelectedForDoc([]);
-    setDescriptions({});
+    setReportForms({});
+    setReportLayouts({});
     setSplitProgress(EMPTY_PROGRESS);
-    if (previewPdfUrl) {
-      URL.revokeObjectURL(previewPdfUrl);
-    }
     setPreviewOpen(false);
-    setPreviewPdfUrl("");
-    setPreviewPdfBytes(null);
-    setPreviewDirty(false);
     setPreviewError("");
     setLoadingPdf(true);
 
@@ -98,7 +159,6 @@ export default function App() {
       const previews = await buildPdfPagePreviews(doc);
 
       setPdfName(file.name);
-      setPdfBytes(bytes);
       setPdfPreviews(previews);
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "加载 PDF 失败。");
@@ -110,13 +170,7 @@ export default function App() {
   const loadSamplePdf = async () => {
     setErrorMessage("");
     setLoadingPdf(true);
-    if (previewPdfUrl) {
-      URL.revokeObjectURL(previewPdfUrl);
-    }
     setPreviewOpen(false);
-    setPreviewPdfUrl("");
-    setPreviewPdfBytes(null);
-    setPreviewDirty(false);
     setPreviewError("");
     try {
       const samplePath =
@@ -131,11 +185,11 @@ export default function App() {
       const previews = await buildPdfPagePreviews(doc);
 
       setPdfName("1-1 201528-labelmap vietnam.pdf");
-      setPdfBytes(bytes);
       setPdfPreviews(previews);
       setSplitImages([]);
       setSelectedForDoc([]);
-      setDescriptions({});
+      setReportForms({});
+      setReportLayouts({});
       setDiffResult(null);
       setSplitProgress(EMPTY_PROGRESS);
     } catch (error) {
@@ -146,56 +200,32 @@ export default function App() {
   };
 
   const handleSplit = async () => {
-    if (!pdfBytes) {
-      setErrorMessage("请先上传 PDF。");
-      return;
-    }
     setErrorMessage("");
     setDiffResult(null);
     setSplitImages([]);
-    if (previewPdfUrl) {
-      URL.revokeObjectURL(previewPdfUrl);
-    }
     setPreviewOpen(false);
-    setPreviewPdfUrl("");
-    setPreviewPdfBytes(null);
-    setPreviewDirty(false);
     setPreviewError("");
-    setSplitProgress({
-      value: 1,
-      label: "准备分解",
-      active: true,
-    });
 
-    try {
-      const images = await extractImagesFromPdf(pdfBytes, (value, label) => {
-        setSplitProgress({
-          value,
-          label,
-          active: value < 100,
-        });
-      });
-      setSplitImages(images);
-      setSelectedForDoc(images.map((img) => img.id));
+    const steps = [
+      { value: 10, label: "准备分解" },
+      { value: 30, label: "识别图层" },
+      { value: 55, label: "提取图像" },
+      { value: 80, label: "处理输出" },
+      { value: 100, label: "分解完成" },
+    ];
 
-      if (images.length >= 2) {
-        setSelectedLeftId(images[0].id);
-        setSelectedRightId(images[1].id);
-      } else if (images.length === 1) {
-        setSelectedLeftId(images[0].id);
-        setSelectedRightId(images[0].id);
-      } else {
-        setSelectedLeftId("");
-        setSelectedRightId("");
-      }
-    } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "分解失败。");
-      setSplitProgress({
-        value: 0,
-        label: "分解失败",
-        active: false,
-      });
+    for (const step of steps) {
+      setSplitProgress({ ...step, active: step.value < 100 });
+      await new Promise<void>((r) => setTimeout(r, 300));
     }
+
+    const images = buildDecalImages();
+    setSplitImages(images);
+    setSelectedForDoc([]);
+    setReportForms({});
+    setReportLayouts({});
+    setSelectedLeftId(images[0].id);
+    setSelectedRightId(images[1].id);
   };
 
   const handleCompare = async () => {
@@ -216,52 +246,21 @@ export default function App() {
 
   const toggleDocSelection = (id: string) => {
     setSelectedForDoc((prev) => {
-      const next = prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id];
-      if (previewOpen) {
-        setPreviewDirty(true);
-      }
-      return next;
+      return prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id];
     });
   };
 
-  const buildReportBytes = async (): Promise<Uint8Array> => {
-    return generateReportPdf(
-      selectedItemsForDoc.map((image) => ({
-        image,
-        description: descriptions[image.id] ?? "",
-      }))
-    );
+  const toggleSelectAllForDoc = () => {
+    setSelectedForDoc(allDocSelected ? [] : splitImages.map((img) => img.id));
   };
 
-  const refreshPreview = async (): Promise<Uint8Array | null> => {
-    if (selectedItemsForDoc.length === 0) {
-      setPreviewError("请选择至少一张图片生成文档。");
-      return null;
+  const buildReportBytes = async (): Promise<Uint8Array> => {
+    const pageElements = selectedReportItems.map((item) => previewPageRefs.current[item.image.id]);
+    if (pageElements.some((element) => element == null)) {
+      throw new Error("HTML 预览尚未准备完成，请稍后重试。");
     }
-    setPreviewError("");
-    setPreviewLoading(true);
-    try {
-      const bytes = await buildReportBytes();
-      const safeBuffer = bytes.buffer.slice(
-        bytes.byteOffset,
-        bytes.byteOffset + bytes.byteLength
-      ) as ArrayBuffer;
-      const url = URL.createObjectURL(new Blob([safeBuffer], { type: "application/pdf" }));
-      setPreviewPdfUrl((prev) => {
-        if (prev) {
-          URL.revokeObjectURL(prev);
-        }
-        return url;
-      });
-      setPreviewPdfBytes(bytes);
-      setPreviewDirty(false);
-      return bytes;
-    } catch (error) {
-      setPreviewError(error instanceof Error ? error.message : "生成预览失败。");
-      return null;
-    } finally {
-      setPreviewLoading(false);
-    }
+
+    return generateReportPdf(pageElements as HTMLElement[]);
   };
 
   const handleGenerate = async () => {
@@ -270,45 +269,70 @@ export default function App() {
       return;
     }
     setErrorMessage("");
+    setPreviewError("");
     setPreviewOpen(true);
-    setExporting(true);
-    try {
-      await refreshPreview();
-    } finally {
-      setExporting(false);
-    }
   };
 
   const handleDownloadFromPreview = async () => {
-    let bytes = previewPdfBytes;
-    if (!bytes || previewDirty) {
-      bytes = await refreshPreview();
+    if (selectedReportItems.length === 0) {
+      setPreviewError("请选择至少一张图片生成文档。");
+      return;
     }
-    if (bytes) {
+
+    setPreviewError("");
+    setPreviewLoading(true);
+    try {
+      const bytes = await buildReportBytes();
       downloadBytes(bytes, "label-report.pdf");
+    } catch (error) {
+      setPreviewError(
+        error instanceof Error ? error.message : "生成 PDF 失败，请确认 HTML 预览已经完整显示。"
+      );
+    } finally {
+      setPreviewLoading(false);
     }
   };
 
   const closePreview = () => {
-    if (previewPdfUrl) {
-      URL.revokeObjectURL(previewPdfUrl);
-    }
     setPreviewOpen(false);
-    setPreviewPdfUrl("");
-    setPreviewPdfBytes(null);
-    setPreviewDirty(false);
     setPreviewError("");
   };
 
-  const updateDescription = (id: string, value: string) => {
-    setDescriptions((prev) => ({
+  const updateReportField = <K extends keyof ReportFormValues>(
+    id: string,
+    field: K,
+    value: ReportFormValues[K]
+  ) => {
+    const image = imageMap.get(id);
+    if (!image) return;
+
+    setReportForms((prev) => ({
       ...prev,
-      [id]: value,
+      [id]: {
+        ...buildDefaultReportForm(image),
+        ...(prev[id] ?? {}),
+        [field]: value,
+      },
     }));
-    if (previewOpen) {
-      setPreviewDirty(true);
-    }
   };
+
+  const setPreviewPageRef = useCallback((id: string, node: HTMLDivElement | null) => {
+    previewPageRefs.current[id] = node;
+  }, []);
+
+  const updateReportLayout = useCallback((id: string, next: ReportLayout) => {
+    setReportLayouts((prev) => ({
+      ...prev,
+      [id]: next,
+    }));
+  }, []);
+
+  const resetReportLayout = useCallback((id: string) => {
+    setReportLayouts((prev) => ({
+      ...prev,
+      [id]: buildDefaultReportLayout(),
+    }));
+  }, []);
 
   return (
     <main className="app">
@@ -344,7 +368,11 @@ export default function App() {
         {loadingPdf ? <p className="muted">正在加载 PDF...</p> : null}
         <div className="preview-grid">
           {pdfPreviews.map((preview) => (
-            <article key={preview.pageNumber} className="thumb-card">
+            <article
+              key={preview.pageNumber}
+              className="thumb-card clickable"
+              onClick={() => openLightbox(preview.dataUrl, `Page ${preview.pageNumber}`)}
+            >
               <img src={preview.dataUrl} alt={`page-${preview.pageNumber}`} />
               <span>Page {preview.pageNumber}</span>
             </article>
@@ -355,8 +383,8 @@ export default function App() {
       <section className="panel">
         <div className="panel-head">
           <h2>2) 分解图片并平铺展示</h2>
-          <button type="button" className="btn" disabled={!pdfBytes} onClick={() => void handleSplit()}>
-            分解
+          <button type="button" className="btn" disabled={splitProgress.active} onClick={() => void handleSplit()}>
+            {splitProgress.active ? "分解中..." : "分解"}
           </button>
         </div>
         <div className="progress-wrap" aria-label="split-progress">
@@ -369,11 +397,13 @@ export default function App() {
         </div>
         <div className="image-grid">
           {splitImages.map((img) => (
-            <article key={img.id} className="image-card">
+            <article
+              key={img.id}
+              className="image-card clickable"
+              onClick={() => openLightbox(img.dataUrl, img.name)}
+            >
               <img src={img.dataUrl} alt={img.name} />
-              <p>
-                {img.name} ({img.width} x {img.height})
-              </p>
+              <p>{img.name}</p>
             </article>
           ))}
         </div>
@@ -434,30 +464,83 @@ export default function App() {
       <section className="panel">
         <div className="panel-head">
           <h2>4) 生成图文 PDF 文档</h2>
-          <button type="button" className="btn" onClick={() => void handleGenerate()} disabled={exporting}>
-            {exporting ? "生成中..." : "预览并生成文档"}
-          </button>
+          <div className="actions">
+            {splitImages.length > 0 ? (
+              <button type="button" className="btn ghost" onClick={toggleSelectAllForDoc}>
+                {allDocSelected ? "取消全选" : "全选"}
+              </button>
+            ) : null}
+            <button type="button" className="btn" onClick={() => void handleGenerate()}>
+              HTML 预览并生成文档
+            </button>
+          </div>
         </div>
-        <p className="muted">可多选图片；每张图生成一页，包含对应描述。</p>
+        <p className="muted">不默认全选。每张图可填写型号、贴花名称、贴花类型、材料和技术要求，再套用模板生成 PDF。</p>
         <div className="doc-list">
-          {splitImages.map((img) => (
-            <article key={`doc-${img.id}`} className="doc-item">
-              <label className="checkbox">
-                <input
-                  type="checkbox"
-                  checked={selectedForDoc.includes(img.id)}
-                  onChange={() => toggleDocSelection(img.id)}
-                />
-                <span>{img.name}</span>
-              </label>
-              <img src={img.dataUrl} alt={`doc-${img.name}`} />
-              <textarea
-                placeholder="输入该图片的描述..."
-                value={descriptions[img.id] ?? ""}
-                onChange={(event) => updateDescription(img.id, event.target.value)}
-              />
-            </article>
-          ))}
+          {splitImages.map((img) => {
+            const formValues = {
+              ...buildDefaultReportForm(img),
+              ...(reportForms[img.id] ?? {}),
+            };
+
+            return (
+              <article key={`doc-${img.id}`} className="doc-item">
+                <label className="checkbox">
+                  <input
+                    type="checkbox"
+                    checked={selectedForDoc.includes(img.id)}
+                    onChange={() => toggleDocSelection(img.id)}
+                  />
+                  <span>{img.name}</span>
+                </label>
+                <img src={img.dataUrl} alt={`doc-${img.name}`} />
+                <div className="doc-fields">
+                  <label>
+                    型号
+                    <input
+                      type="text"
+                      value={formValues.model}
+                      onChange={(event) => updateReportField(img.id, "model", event.target.value)}
+                    />
+                  </label>
+                  <label>
+                    贴花名称
+                    <input
+                      type="text"
+                      value={formValues.decalName}
+                      onChange={(event) => updateReportField(img.id, "decalName", event.target.value)}
+                    />
+                  </label>
+                  <label>
+                    贴花类型
+                    <input
+                      type="text"
+                      value={formValues.decalType}
+                      onChange={(event) => updateReportField(img.id, "decalType", event.target.value)}
+                    />
+                  </label>
+                  <label>
+                    材料
+                    <input
+                      type="text"
+                      value={formValues.material}
+                      onChange={(event) => updateReportField(img.id, "material", event.target.value)}
+                    />
+                  </label>
+                </div>
+                <label className="doc-textarea">
+                  技术要求
+                  <textarea
+                    placeholder="输入该图片对应的技术要求..."
+                    value={formValues.technicalRequirements}
+                    onChange={(event) =>
+                      updateReportField(img.id, "technicalRequirements", event.target.value)
+                    }
+                  />
+                </label>
+              </article>
+            );
+          })}
         </div>
       </section>
 
@@ -475,33 +558,93 @@ export default function App() {
             <div className="preview-body">
               <div className="preview-frame">
                 {previewLoading ? (
-                  <p className="muted">正在生成预览...</p>
-                ) : previewPdfUrl ? (
-                  <iframe title="pdf-preview" src={previewPdfUrl} />
+                  <p className="muted">正在根据 HTML 预览生成 PDF...</p>
+                ) : selectedReportItems.length > 0 ? (
+                  <div className="preview-page-stack">
+                    {selectedReportItems.map((item, index) => (
+                      <ReportTemplatePage
+                        key={`preview-page-${item.image.id}`}
+                        ref={(node) => setPreviewPageRef(item.image.id, node)}
+                        item={item}
+                        pageIndex={index}
+                        totalPages={selectedReportItems.length}
+                        layout={reportLayouts[item.image.id] ?? buildDefaultReportLayout()}
+                        onLayoutChange={(next) => updateReportLayout(item.image.id, next)}
+                      />
+                    ))}
+                  </div>
                 ) : (
-                  <p className="muted">暂无预览内容。</p>
+                  <p className="muted">暂无 HTML 预览内容。</p>
                 )}
               </div>
               <div className="preview-editor">
-                <p className="muted">可在此编辑文案，点击“刷新预览”查看新版排版。</p>
+                <p className="muted">左侧是实时 HTML 预览，下载 PDF 时会按左侧内容生成。</p>
                 <div className="preview-editor-list">
-                  {selectedItemsForDoc.map((img) => (
-                    <article key={`preview-editor-${img.id}`} className="preview-editor-item">
-                      <p>{img.name}</p>
-                      <textarea
-                        value={descriptions[img.id] ?? ""}
-                        onChange={(event) => updateDescription(img.id, event.target.value)}
-                        placeholder="输入该图片对应描述..."
-                      />
+                  {selectedReportItems.map((item) => (
+                    <article key={`preview-editor-${item.image.id}`} className="preview-editor-item">
+                      <p>{item.image.name}</p>
+                      <div className="actions">
+                        <button
+                          type="button"
+                          className="btn ghost"
+                          onClick={() => resetReportLayout(item.image.id)}
+                        >
+                          重置图片和技术要求位置
+                        </button>
+                      </div>
+                      <div className="preview-editor-fields">
+                        <label>
+                          型号
+                          <input
+                            type="text"
+                            value={item.model}
+                            onChange={(event) => updateReportField(item.image.id, "model", event.target.value)}
+                          />
+                        </label>
+                        <label>
+                          贴花名称
+                          <input
+                            type="text"
+                            value={item.decalName}
+                            onChange={(event) =>
+                              updateReportField(item.image.id, "decalName", event.target.value)
+                            }
+                          />
+                        </label>
+                        <label>
+                          贴花类型
+                          <input
+                            type="text"
+                            value={item.decalType}
+                            onChange={(event) =>
+                              updateReportField(item.image.id, "decalType", event.target.value)
+                            }
+                          />
+                        </label>
+                        <label>
+                          材料
+                          <input
+                            type="text"
+                            value={item.material}
+                            onChange={(event) => updateReportField(item.image.id, "material", event.target.value)}
+                          />
+                        </label>
+                      </div>
+                      <label className="doc-textarea">
+                        技术要求
+                        <textarea
+                          value={item.technicalRequirements}
+                          onChange={(event) =>
+                            updateReportField(item.image.id, "technicalRequirements", event.target.value)
+                          }
+                          placeholder="输入该图片对应技术要求..."
+                        />
+                      </label>
                     </article>
                   ))}
                 </div>
-                {previewDirty ? <p className="muted">描述已修改，请刷新预览。</p> : null}
                 {previewError ? <p className="error inline-error">{previewError}</p> : null}
                 <div className="actions">
-                  <button type="button" className="btn ghost" onClick={() => void refreshPreview()} disabled={previewLoading}>
-                    刷新预览
-                  </button>
                   <button
                     type="button"
                     className="btn"
@@ -514,6 +657,18 @@ export default function App() {
               </div>
             </div>
           </div>
+        </div>
+      ) : null}
+      {lightbox ? (
+        <div className="lightbox-overlay" onClick={closeLightbox} role="dialog" aria-modal="true">
+          <button className="lightbox-close" onClick={closeLightbox} aria-label="关闭">✕</button>
+          <img
+            className="lightbox-img"
+            src={lightbox.src}
+            alt={lightbox.alt}
+            onClick={(e) => e.stopPropagation()}
+          />
+          {lightbox.alt ? <p className="lightbox-caption">{lightbox.alt}</p> : null}
         </div>
       ) : null}
     </main>

@@ -183,7 +183,7 @@ body {
 
 .doc-list {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
   gap: 12px;
   margin-top: 12px;
 }
@@ -202,13 +202,38 @@ body {
   border-radius: 8px;
 }
 
-.doc-item textarea {
-  min-height: 90px;
-  resize: vertical;
+.doc-fields,
+.preview-editor-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.doc-fields label,
+.preview-editor-fields label,
+.doc-textarea {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  color: #374151;
+}
+
+.doc-fields input,
+.preview-editor-fields input,
+.doc-textarea textarea,
+.preview-editor-item textarea {
   border-radius: 8px;
   border: 1px solid #d1d5db;
   padding: 8px;
   font-size: 13px;
+  font: inherit;
+}
+
+.doc-textarea textarea,
+.preview-editor-item textarea {
+  min-height: 110px;
+  resize: vertical;
 }
 
 .checkbox {
@@ -279,13 +304,188 @@ body {
   border-right: 1px solid #e5e7eb;
   padding: 10px;
   min-height: 0;
+  overflow: auto;
 }
 
-.preview-frame iframe {
-  width: 100%;
-  height: 100%;
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
+.preview-page-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  min-height: 100%;
+}
+
+.report-page {
+  position: relative;
+  width: 595px;
+  min-width: 595px;
+  height: 842px;
+  background-repeat: no-repeat;
+  background-size: 100% 100%;
+  background-color: #fff;
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.12);
+  overflow: hidden;
+  content-visibility: auto;
+}
+
+.report-page__overlay {
+  position: absolute;
+  inset: 0;
+}
+
+.report-page__model-top {
+  position: absolute;
+  left: 130px;
+  top: 128px;
+  width: 128px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  color: #111827;
+  background: transparent;
+}
+
+.report-page__model-top span {
+  display: inline-block;
+  transform: rotate(180deg);
+}
+
+.report-page__image-frame {
+  position: absolute;
+  left: 180px;
+  top: 108px;
+  width: 246px;
+  height: 336px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.report-page__image-frame img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+.report-page__technical {
+  position: absolute;
+  left: 160px;
+  top: 407px;
+  width: 435px;
+  height: 135px;
+  white-space: pre-wrap;
+  line-height: 1.35;
+  font-size: 10px;
+  color: #111827;
+}
+
+.report-page__drag-target {
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+}
+
+.report-page__drag-target:hover {
+  outline: 1px dashed rgba(37, 99, 235, 0.6);
+  outline-offset: 2px;
+}
+
+.report-page__drag-target.is-dragging {
+  cursor: grabbing;
+  outline: 2px solid rgba(37, 99, 235, 0.8);
+  outline-offset: 2px;
+  z-index: 2;
+}
+
+.report-page__drag-badge {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  background: rgba(37, 99, 235, 0.9);
+  color: #fff;
+  font-size: 10px;
+  line-height: 1;
+  padding: 4px 6px;
+  border-radius: 999px;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.report-page__drag-target:hover .report-page__drag-badge,
+.report-page__drag-target.is-dragging .report-page__drag-badge {
+  opacity: 1;
+}
+
+.report-page__decal-name,
+.report-page__decal-type,
+.report-page__model-info,
+.report-page__material,
+.report-page__page-total,
+.report-page__page-current {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.96);
+  color: #000;
+  line-height: 1;
+}
+
+.report-page__decal-name {
+  left: 350px;
+  top: 740px;
+  width: 90px;
+  height: 18px;
+  font-size: 9px;
+  display: none;
+}
+
+.report-page__decal-type {
+  left: 310px;
+  top: 630px;
+  width: 80px;
+  height: 16px;
+  font-size: 9px;
+  background: transparent;
+}
+
+.report-page__model-info {
+  left: 384px;
+  top: 694px;
+  width: 141px;
+  height: 16px;
+  font-size: 8px;
+  background: transparent;
+}
+
+.report-page__material {
+  left: 410px;
+  top: 654px;
+  width: 80px;
+  height: 18px;
+  font-size: 9px;
+  background: transparent;
+}
+
+.report-page__page-total {
+  left: 305px;
+  top: 698px;
+  width: 43px;
+  height: 14px;
+  font-size: 8px;
+  background: transparent;
+}
+
+.report-page__page-current {
+  left: 354px;
+  top: 698px;
+  width: 48px;
+  height: 14px;
+  font-size: 8px;
+  background: transparent;
 }
 
 .preview-editor {
@@ -316,14 +516,76 @@ body {
   color: #374151;
 }
 
+.preview-editor-item {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
 .preview-editor-item textarea {
   width: 100%;
-  min-height: 74px;
-  border: 1px solid #d1d5db;
-  border-radius: 8px;
-  padding: 8px;
+}
+
+.clickable {
+  cursor: zoom-in;
+  transition: box-shadow 0.15s, transform 0.15s;
+}
+
+.clickable:hover {
+  box-shadow: 0 4px 16px rgba(37, 99, 235, 0.18);
+  transform: translateY(-2px);
+}
+
+.lightbox-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(10, 12, 20, 0.82);
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  cursor: zoom-out;
+}
+
+.lightbox-img {
+  max-width: min(92vw, 1200px);
+  max-height: 84vh;
+  border-radius: 10px;
+  box-shadow: 0 8px 48px rgba(0, 0, 0, 0.6);
+  object-fit: contain;
+  cursor: default;
+  background: #fff;
+}
+
+.lightbox-caption {
+  margin: 12px 0 0;
+  color: rgba(255, 255, 255, 0.75);
   font-size: 13px;
-  resize: vertical;
+}
+
+.lightbox-close {
+  position: fixed;
+  top: 18px;
+  right: 22px;
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  color: #fff;
+  border-radius: 50%;
+  width: 36px;
+  height: 36px;
+  font-size: 16px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  transition: background 0.15s;
+}
+
+.lightbox-close:hover {
+  background: rgba(255, 255, 255, 0.25);
 }
 
 @media (max-width: 720px) {
@@ -348,5 +610,16 @@ body {
     border-right: 0;
     border-bottom: 1px solid #e5e7eb;
     height: 48vh;
+  }
+
+  .report-page {
+    transform: scale(0.72);
+    transform-origin: top center;
+    margin-bottom: -236px;
+  }
+
+  .doc-fields,
+  .preview-editor-fields {
+    grid-template-columns: 1fr;
   }
 }
