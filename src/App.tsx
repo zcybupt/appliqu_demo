@@ -93,8 +93,8 @@ export default function App() {
   const [loadingPdf, setLoadingPdf] = useState(false);
   const [splitProgress, setSplitProgress] = useState<SplitProgressState>(EMPTY_PROGRESS);
   const [splitImages, setSplitImages] = useState<ExtractedImage[]>([]);
-  const [selectedLeftId, setSelectedLeftId] = useState<string>(SAMPLE_IMAGES[0].id);
-  const [selectedRightId, setSelectedRightId] = useState<string>(SAMPLE_IMAGES[1].id);
+  const [selectedLeftId, setSelectedLeftId] = useState<string>("");
+  const [selectedRightId, setSelectedRightId] = useState<string>("");
   const [diffResult, setDiffResult] = useState<DiffResult | null>(null);
   const [errorMessage, setErrorMessage] = useState<string>("");
   const [selectedForDoc, setSelectedForDoc] = useState<string[]>([]);
@@ -230,8 +230,8 @@ export default function App() {
     setSelectedForDoc([]);
     setReportForms({});
     setReportLayouts({});
-    setSelectedLeftId(images[0].id);
-    setSelectedRightId(images[1].id);
+    setSelectedLeftId("");
+    setSelectedRightId("");
   };
 
   const handleCompare = () => {
@@ -431,6 +431,7 @@ export default function App() {
           <label>
             左图
             <select value={selectedLeftId} onChange={(e) => setSelectedLeftId(e.target.value)}>
+              <option value="">请选择图片</option>
               {SAMPLE_IMAGES.map((img) => (
                 <option value={img.id} key={`left-${img.id}`}>
                   {img.name}
@@ -441,6 +442,7 @@ export default function App() {
           <label>
             右图
             <select value={selectedRightId} onChange={(e) => setSelectedRightId(e.target.value)}>
+              <option value="">请选择图片</option>
               {SAMPLE_IMAGES.map((img) => (
                 <option value={img.id} key={`right-${img.id}`}>
                   {img.name}
@@ -450,12 +452,16 @@ export default function App() {
           </label>
         </div>
         <div className="compare-previews">
-          {SAMPLE_IMAGES.map((img) => (
-            <article key={img.id} className="image-card clickable" onClick={() => openLightbox(img.url, img.name)}>
-              <img src={img.url} alt={img.name} />
-              <p>{img.name}</p>
-            </article>
-          ))}
+          {selectedLeftId || selectedRightId ? (
+            SAMPLE_IMAGES.filter((img) => img.id === selectedLeftId || img.id === selectedRightId).map((img) => (
+              <article key={img.id} className="image-card clickable" onClick={() => openLightbox(img.url, img.name)}>
+                <img src={img.url} alt={img.name} />
+                <p>{img.name}</p>
+              </article>
+            ))
+          ) : (
+            <p className="muted">请选择左图和右图后再预览。</p>
+          )}
         </div>
         {diffResult ? (
           <div className="compare-result">
