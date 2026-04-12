@@ -302,7 +302,6 @@ function iou(a: Box, b: Box): number {
 }
 
 function detectInfoBars(
-  binary: Uint8Array,
   hLines: Uint8Array,
   vLines: Uint8Array,
   gray: Uint8Array,
@@ -749,7 +748,7 @@ export async function extractImagesFromPdf(
 
       await sleep(0);
       setStage(pagePct(0.5), `第 ${pageNum}/${totalPages} 页 · 识别信息条`);
-      const infoBars = detectInfoBars(binary, hLines, vLines, grayClean, w, h, s);
+      const infoBars = detectInfoBars(hLines, vLines, grayClean, w, h, s);
 
       if (infoBars.length > 0) {
         setStage(pagePct(0.6), `第 ${pageNum}/${totalPages} 页 · 检测贴花元素`);
