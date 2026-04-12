@@ -96,6 +96,7 @@ export default function App() {
   const [selectedLeftId, setSelectedLeftId] = useState<string>("");
   const [selectedRightId, setSelectedRightId] = useState<string>("");
   const [diffResult, setDiffResult] = useState<DiffResult | null>(null);
+  const [compareLoading, setCompareLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string>("");
   const [selectedForDoc, setSelectedForDoc] = useState<string[]>([]);
   const [reportForms, setReportForms] = useState<Record<string, ReportFormValues>>({});
@@ -105,6 +106,14 @@ export default function App() {
   const [previewError, setPreviewError] = useState("");
   const [lightbox, setLightbox] = useState<{ src: string; alt: string } | null>(null);
   const previewPageRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const compareTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const clearCompareTimer = useCallback(() => {
+    if (compareTimerRef.current !== null) {
+      clearTimeout(compareTimerRef.current);
+      compareTimerRef.current = null;
+    }
+  }, []);
 
   const openLightbox = useCallback((src: string, alt: string) => setLightbox({ src, alt }), []);
   const closeLightbox = useCallback(() => setLightbox(null), []);
@@ -121,6 +130,12 @@ export default function App() {
     document.body.style.overflow = locked ? "hidden" : "";
     return () => { document.body.style.overflow = ""; };
   }, [previewOpen, lightbox]);
+
+  useEffect(() => {
+    return () => {
+      clearCompareTimer();
+    };
+  }, [clearCompareTimer]);
 
   const imageMap = useMemo(
     () => new Map(splitImages.map((img) => [img.id, img])),
@@ -149,6 +164,8 @@ export default function App() {
 
   const handleFileChange = async (file: File) => {
     setErrorMessage("");
+    clearCompareTimer();
+    setCompareLoading(false);
     setDiffResult(null);
     setSplitImages([]);
     setSelectedForDoc([]);
@@ -196,6 +213,8 @@ export default function App() {
       setSelectedForDoc([]);
       setReportForms({});
       setReportLayouts({});
+      clearCompareTimer();
+      setCompareLoading(false);
       setDiffResult(null);
       setSplitProgress(EMPTY_PROGRESS);
     } catch (error) {
@@ -207,6 +226,8 @@ export default function App() {
 
   const handleSplit = async () => {
     setErrorMessage("");
+    clearCompareTimer();
+    setCompareLoading(false);
     setDiffResult(null);
     setSplitImages([]);
     setPreviewOpen(false);
@@ -235,6 +256,7 @@ export default function App() {
   };
 
   const handleCompare = () => {
+    if (compareLoading) return;
     if (!selectedLeftId || !selectedRightId) {
       setErrorMessage("请先选择两张图片再进行对比。");
       return;
@@ -244,15 +266,22 @@ export default function App() {
       return;
     }
     setErrorMessage("");
-    setDiffResult({
-      width: 0,
-      height: 0,
-      diffPixels: 0,
-      boxes: [],
-      leftOverlayDataUrl: "",
-      rightOverlayDataUrl: "",
-      diffMaskDataUrl: DIFF_RESULT_URL,
-    });
+    setDiffResult(null);
+    setCompareLoading(true);
+    clearCompareTimer();
+    compareTimerRef.current = setTimeout(() => {
+      compareTimerRef.current = null;
+      setDiffResult({
+        width: 0,
+        height: 0,
+        diffPixels: 0,
+        boxes: [],
+        leftOverlayDataUrl: "",
+        rightOverlayDataUrl: "",
+        diffMaskDataUrl: DIFF_RESULT_URL,
+      });
+      setCompareLoading(false);
+    }, 1100);
   };
 
   const toggleDocSelection = (id: string) => {
@@ -348,7 +377,7 @@ export default function App() {
   return (
     <main className="app">
       <header className="header">
-        <h1>React PDF 图像处理 Demo</h1>
+        <h1>PDF 图像处理 Demo</h1>
         <p>上传 PDF，分解图片，对比差异，并导出图文 PDF（纯前端，无真实网络请求）。</p>
       </header>
 
@@ -423,8 +452,8 @@ export default function App() {
       <section className="panel">
         <div className="panel-head">
           <h2>3) 选择两图自动对比</h2>
-          <button type="button" className="btn" onClick={handleCompare}>
-            对比
+          <button type="button" className="btn" onClick={handleCompare} disabled={compareLoading}>
+            {compareLoading ? "对比中..." : "对比"}
           </button>
         </div>
         <div className="compare-controls">
@@ -463,7 +492,9 @@ export default function App() {
             <p className="muted">请选择左图和右图后再预览。</p>
           )}
         </div>
-        {diffResult ? (
+        {compareLoading ? (
+          <p className="muted">正在对比...</p>
+        ) : diffResult ? (
           <div className="compare-result">
             <article className="compare-result-full">
               <h3>对比结果</h3>
